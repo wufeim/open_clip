@@ -89,16 +89,16 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
         if not args.skip_scheduler:
             scheduler(step)
 
-        images, texts = batch
-        images = images.to(device=device, dtype=input_dtype, non_blocking=True)
-        texts = texts.to(device=device, non_blocking=True)
+        images_in, images_out = batch
+        images_in = images_in.to(device=device, dtype=input_dtype, non_blocking=True)  # (bs, 3, 224, 224)
+        images_out = images_out.to(device=device, dtype=input_dtype, non_blocking=True)  # (bs, 3, 512, 512)
 
         data_time_m.update(time.time() - end)
         optimizer.zero_grad()
 
         if args.accum_freq == 1:
             with autocast():
-                model_out = model(images, texts)
+                model_out = model(images_in, images_out)
                 logit_scale = model_out["logit_scale"]
                 if args.distill:
                     with torch.no_grad():
@@ -114,7 +114,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
             # First, cache the features without any gradient tracking.
             with torch.no_grad():
                 with autocast():
-                    model_out = model(images, texts)
+                    model_out = model(images_in, images_out)
 
                     for f in ("logit_scale", "logit_bias"):
                         model_out.pop(f, None)
@@ -192,7 +192,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
         end = time.time()
         batch_count = i_accum + 1
         if is_master(args) and (i_accum % args.log_every_n_steps == 0 or batch_count == num_batches_per_epoch):
-            batch_size = len(images)
+            batch_size = len(images_in)
             num_samples = batch_count * batch_size * args.accum_freq * args.world_size
             samples_per_epoch = dataloader.num_samples
             percent_complete = 100.0 * batch_count / num_batches_per_epoch
@@ -206,7 +206,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
             logit_scale_scalar = logit_scale.item()
             loss_log = " ".join(
                 [
-                    f"{loss_name.capitalize()}: {loss_m.val:#.5g} ({loss_m.avg:#.5g})" 
+                    f"{loss_name.capitalize()}: {loss_m.val:#.5g} ({loss_m.avg:#.5g})"
                     for loss_name, loss_m in losses_m.items()
                 ]
             )
@@ -228,7 +228,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                 "samples_per_second_per_gpu": samples_per_second_per_gpu,
                 "scale": logit_scale_scalar,
                 "lr": optimizer.param_groups[0]["lr"]
-            }            
+            }
             log_data.update({name:val.val for name,val in losses_m.items()})
 
             log_data = {"train/" + name: val for name, val in log_data.items()}
@@ -236,12 +236,12 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
             if tb_writer is not None:
                 for name, val in log_data.items():
                     tb_writer.add_scalar(name, val, step)
-            
+
             if args.wandb:
                 assert wandb is not None, 'Please install wandb.'
                 log_data['step'] = step  # for backwards compatibility
                 wandb.log(log_data, step=step)
-            
+
             # resetting batch / data time meters per log window
             batch_time_m.reset()
             data_time_m.reset()

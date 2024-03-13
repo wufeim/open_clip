@@ -8,6 +8,8 @@ import sys
 import braceexpand
 from dataclasses import dataclass
 from multiprocessing import Value
+from torchvision import transforms
+from torchvision.datasets import ImageFolder
 
 import numpy as np
 import pandas as pd
@@ -24,6 +26,52 @@ try:
     import horovod.torch as hvd
 except ImportError:
     hvd = None
+
+
+class DeDiffusionDataset(ImageFolder):
+    def __init__(self, root, transform, resolution=512, center_crop=True, random_flip=True):
+        super().__init__(root=root, transform=transform)
+        self.gen_transform = transforms.Compose(
+            [
+                transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(512) if center_crop else transforms.RandomCrop(resolution),
+                transforms.RandomHorizontalFlip() if random_flip else transforms.Lambda(lambda x: x),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ]
+        )
+
+    def __getitem__(self, index):
+        path, target = self.samples[index]
+        sample = self.loader(path)
+        sample_in = self.transform(sample)
+        sample_out = self.gen_transform(sample)
+
+        return sample_in, sample_out
+
+
+
+def get_dediffusion_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
+    data_path = args.train_data if is_train else args.val_data
+    assert os.path.isdir(data_path)
+    dataset = DeDiffusionDataset(data_path, preprocess_fn)
+    num_samples = len(dataset)
+    sampler = DistributedSampler(dataset) if args.distributed and is_train else None
+    shuffle = is_train and sampler is None
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=shuffle,
+        num_workers=args.workers,
+        pin_memory=True,
+        sampler=sampler,
+        drop_last=is_train,
+    )
+    dataloader.num_samples = num_samples
+    dataloader.num_batches = len(dataloader)
+
+    return DataInfo(dataloader, sampler)
 
 
 class CsvDataset(Dataset):
@@ -342,13 +390,13 @@ def get_wds_dataset(args, preprocess_img, is_train, epoch=0, floor=False, tokeni
                     'Please specify it via `--train-num-samples` if no dataset length info is present.')
     else:
         # Eval will just exhaust the iterator if the size is not specified.
-        num_samples = args.val_num_samples or 0 
+        num_samples = args.val_num_samples or 0
 
     shared_epoch = SharedEpoch(epoch=epoch)  # create a shared epoch store to sync epoch to dataloader worker proc
 
     if is_train and args.train_data_upsampling_factors is not None:
         assert resampled, "--train_data_upsampling_factors is only supported when sampling with replacement (with --dataset-resampled)."
-    
+
     if resampled:
         pipeline = [ResampledShards2(
             input_shards,
@@ -531,17 +579,20 @@ def get_dataset_fn(data_path, dataset_type):
     elif dataset_type == "synthetic":
         return get_synthetic_dataset
     elif dataset_type == "auto":
-        ext = data_path.split('.')[-1]
-        if ext in ['csv', 'tsv']:
-            return get_csv_dataset
-        elif ext in ['tar']:
-            return get_wds_dataset
+        if os.path.isdir(data_path):
+            return get_dediffusion_dataset
         else:
-            raise ValueError(
-                f"Tried to figure out dataset type, but failed for extension {ext}.")
+            ext = data_path.split('.')[-1]
+            if ext in ['csv', 'tsv']:
+                return get_csv_dataset
+            elif ext in ['tar']:
+                return get_wds_dataset
+            else:
+                raise ValueError(
+                    f"Tried to figure out dataset type, but failed for extension {ext}.")
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
-    
+
 
 def get_data(args, preprocess_fns, epoch=0, tokenizer=None):
     preprocess_train, preprocess_val = preprocess_fns
