@@ -366,14 +366,15 @@ class DeDiffusion(nn.Module):
 
         model_pred = self.sd_unet(noisy_latents, timesteps, encoder_hidden_states, return_dict=False)[0]
 
-        out_dict = {
-            "image_features": image_latent,
-            "logits": logits,
-            "logit_scale": self.logit_scale.exp()
-        }
-        if self.logit_bias is not None:
-            out_dict["logit_bias"] = self.logit_bias
+        # out_dict = {
+        #     "image_features": image_latent,
+        #     "logits": logits,
+        #     "logit_scale": self.logit_scale.exp()
+        # }
+        # if self.logit_bias is not None:
+        #     out_dict["logit_bias"] = self.logit_bias
         # Stable diffusion outputs
+        out_dict = {}
         out_dict["model_pred"] = model_pred
         out_dict["target"] = target
         return out_dict
