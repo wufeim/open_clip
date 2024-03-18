@@ -377,6 +377,7 @@ class DeDiffusion(nn.Module):
         out_dict = {}
         out_dict["model_pred"] = model_pred
         out_dict["target"] = target
+        out_dict['logits'] = logits
         return out_dict
 
     def generate(

@@ -1,3 +1,4 @@
+import datetime
 import os
 
 import torch
@@ -86,6 +87,7 @@ def init_distributed_device(args):
             os.environ['RANK'] = str(args.rank)
             os.environ['WORLD_SIZE'] = str(args.world_size)
             torch.distributed.init_process_group(
+                timeout=datetime.timedelta(seconds=3600),
                 backend=args.dist_backend,
                 init_method=args.dist_url,
                 world_size=args.world_size,
@@ -95,6 +97,7 @@ def init_distributed_device(args):
             # DDP via torchrun, torch.distributed.launch
             args.local_rank, _, _ = world_info_from_env()
             torch.distributed.init_process_group(
+                timeout=datetime.timedelta(seconds=3600),
                 backend=args.dist_backend,
                 init_method=args.dist_url)
             args.world_size = torch.distributed.get_world_size()

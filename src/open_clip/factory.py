@@ -102,6 +102,10 @@ def get_tokenizer(
         config = get_model_config(model_name)
         assert config is not None, f"No valid model config found for {model_name}."
 
+    if 'dediffusion' in model_name.lower():
+        from transformers import CLIPTokenizer
+        return CLIPTokenizer.from_pretrained(**config["diffusion_model_cfg"]["tokenizer"])
+
     text_config = config.get('text_cfg', {})
     if 'tokenizer_kwargs' in text_config:
         tokenizer_kwargs = dict(text_config['tokenizer_kwargs'], **kwargs)
