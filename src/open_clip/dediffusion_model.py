@@ -254,6 +254,7 @@ class DeDiffusion(nn.Module):
 
         self.num_tokens = num_tokens
         self.query_text_emb = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
+        self.query_text_emb.requires_grad = True
 
         vocab_size = (
             self.text_cfg.vocab_size  # for hf models
